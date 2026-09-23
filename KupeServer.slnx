@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/KupeServer.Api/KupeServer.Api.csproj" />
+  </Folder>
+</Solution>
