@@ -1,3 +1,4 @@
+using KupeServer.Api.Features.Users.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace KupeServer.Api.Data;
@@ -8,4 +9,5 @@ public class AppDbContext : DbContext
     {
     }
 
+    public DbSet<User> Users { get; set; } = null!;
 }
