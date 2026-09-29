@@ -50,6 +50,11 @@ public class GlobalExceptionHandler : IExceptionHandler
             EmailAlreadyExistsException => (StatusCodes.Status409Conflict, exception.Message),
             InvalidCredentialsException => (StatusCodes.Status401Unauthorized, exception.Message),
             InvalidRefreshTokenException => (StatusCodes.Status401Unauthorized, exception.Message),
+            UnsupportedExternalProviderException => (StatusCodes.Status400BadRequest, exception.Message),
+            InvalidExternalTokenException => (StatusCodes.Status401Unauthorized, exception.Message),
+            ExternalEmailNotVerifiedException => (StatusCodes.Status401Unauthorized, exception.Message),
+            ExternalEmailConflictException => (StatusCodes.Status409Conflict, exception.Message),
+            ExternalIdentityAlreadyLinkedException => (StatusCodes.Status409Conflict, exception.Message),
             _ => (StatusCodes.Status500InternalServerError, "An unexpected error occurred.")
         };
     }

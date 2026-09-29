@@ -46,6 +46,12 @@ public class AuthService(AppDbContext context, IConfiguration configuration, IPa
     public async Task<TokenResponseDto> Login(LoginDto request)
     {
         var user = await context.Users.FirstOrDefaultAsync(u => u.Email == request.Email) ?? throw new InvalidCredentialsException();
+        
+        if (user.PasswordHash is null)
+        {
+            throw new InvalidCredentialsException();
+        }
+        
         var passwordVerificationResult = passwordHasher.VerifyHashedPassword(
             user, user.PasswordHash, request.Password);
 
@@ -59,7 +65,7 @@ public class AuthService(AppDbContext context, IConfiguration configuration, IPa
         return response;
     }
 
-    private async Task<TokenResponseDto> CreateTokenResponse(User user)
+    public async Task<TokenResponseDto> CreateTokenResponse(User user)
     {
         var response = new TokenResponseDto
         {
