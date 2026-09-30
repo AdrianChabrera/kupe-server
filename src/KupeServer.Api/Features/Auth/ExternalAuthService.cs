@@ -53,7 +53,9 @@ public partial class ExternalAuthService(
             throw new ExternalEmailNotVerifiedException(info.Provider);
         }
 
-        if (await context.Users.AnyAsync(u => u.Email == info.Email, ct))
+        var email = info.Email.Trim().ToLowerInvariant();
+
+        if (await context.Users.AnyAsync(u => u.Email == email, ct))
         {
             throw new ExternalEmailConflictException();
         }
@@ -61,7 +63,7 @@ public partial class ExternalAuthService(
         var user = new User
         {
             Username = await GenerateUniqueUsername(info, ct),
-            Email = info.Email,
+            Email = email,
             PasswordHash = null,
             Role = UserRole.User
         };

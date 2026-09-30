@@ -23,9 +23,11 @@ public class AuthService(AppDbContext context, IConfiguration configuration, IPa
             throw new UsernameAlreadyExistsException(request.Username);
         }
 
-        if (await context.Users.AnyAsync(u => u.Email == request.Email))
+        var email = request.Email.Trim().ToLowerInvariant();
+
+        if (await context.Users.AnyAsync(u => u.Email == email))
         {
-            throw new EmailAlreadyExistsException(request.Email);
+            throw new EmailAlreadyExistsException(email);
         }
 
         var user = new User();
@@ -33,7 +35,7 @@ public class AuthService(AppDbContext context, IConfiguration configuration, IPa
 
             
         user.Username = request.Username;
-        user.Email = request.Email;
+        user.Email = email;
         user.PasswordHash = hashedPassword;
         user.Role = UserRole.User;
 
@@ -45,7 +47,9 @@ public class AuthService(AppDbContext context, IConfiguration configuration, IPa
 
     public async Task<TokenResponseDto> Login(LoginDto request)
     {
-        var user = await context.Users.FirstOrDefaultAsync(u => u.Email == request.Email) ?? throw new InvalidCredentialsException();
+        var email = request.Email.Trim().ToLowerInvariant();
+        
+        var user = await context.Users.FirstOrDefaultAsync(u => u.Email == email) ?? throw new InvalidCredentialsException();
         
         if (user.PasswordHash is null)
         {
