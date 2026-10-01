@@ -2,6 +2,7 @@ using System.Security.Claims;
 using KupeServer.Api.Common.Middleware;
 using KupeServer.Api.Data;
 using KupeServer.Api.Features.Auth;
+using KupeServer.Api.Features.Countries.Data;
 using KupeServer.Api.Features.Users.Entities;
 using KupeServer.Api.Common.Extensions;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -12,6 +13,16 @@ using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
+if (args.Contains("--import-geonames"))
+{
+    var langs = builder.Configuration["langs"]?.Split(',') ?? ["en"];
+
+    await GeoNamesImporter.RunAsync(
+        builder.Configuration.GetConnectionString("DefaultConnection")!,
+        languages: langs);
+    return;
+}
+
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails();
 builder.Services.AddControllers();
@@ -20,7 +31,7 @@ builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.AddExternalAuthProviders(builder.Configuration);
 
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")).UseSnakeCaseNamingConvention());
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>

@@ -480,3 +480,6 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+#Geonames downloaded data
+src/KupeServer.Api/Data/Geonames
