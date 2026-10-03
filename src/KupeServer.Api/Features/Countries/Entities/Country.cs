@@ -13,9 +13,9 @@ public class Country
     public string? CurrencyCode { get; set; }
     public string? CurrencyName { get; set; }
     public string? PhonePrefix { get; set; }
-    public string? Languages { get; set; }
     public int GeonameId { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
     public ICollection<Place> Places { get; set; } = new List<Place>();
+    public ICollection<CountryLanguage> Languages { get; set; } = new List<CountryLanguage>();
 }

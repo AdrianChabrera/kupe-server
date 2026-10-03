@@ -28,6 +28,7 @@ public static class GeoNamesImporter
         var countryFile = await Download(http, "countryInfo.txt", ct);
         var placesZip   = await Download(http, $"{placesDataset}.zip", ct);
         var altZip      = await Download(http, "alternateNamesV2.zip", ct);
+        var langCodesFile = await Download(http, "iso-languagecodes.txt", ct);
 
         await Exec(conn, """
             CREATE TEMP TABLE staging_country (
@@ -39,9 +40,10 @@ public static class GeoNamesImporter
                 feature_code text, country_iso2 text, admin1 text, population bigint,
                 elevation int, timezone text);
             CREATE TEMP TABLE staging_alt_name (geoname_id int, language text, name text, is_preferred boolean);
+            CREATE TEMP TABLE staging_language_code (iso3 text, iso2 text, iso1 text, name text);
             """, ct);
 
-        Console.WriteLine("Países...");
+        Console.WriteLine("Countries...");
         await using (var w = await conn.BeginBinaryImportAsync(
             "COPY staging_country (iso2,iso3,name,capital,continent,area,population,currency_code,currency_name,phone,languages,geoname_id) FROM STDIN (FORMAT BINARY)", ct))
         {
@@ -58,7 +60,21 @@ public static class GeoNamesImporter
             await w.CompleteAsync(ct);
         }
 
-        Console.WriteLine($"Poblaciones ({placesDataset})...");
+        Console.WriteLine("Language codes...");
+        await using (var w = await conn.BeginBinaryImportAsync(
+            "COPY staging_language_code (iso3,iso2,iso1,name) FROM STDIN (FORMAT BINARY)", ct))
+        {
+            await using var fs = File.OpenRead(langCodesFile);
+            await foreach (var f in ReadTsv(fs, ct))
+            {
+                if (f.Length < 4 || f[0] == "ISO 639-3") continue;
+                await w.StartRowAsync(ct);
+                await Txt(w, f[0], ct); await Txt(w, f[1], ct); await Txt(w, f[2], ct); await Txt(w, f[3], ct);
+            }
+            await w.CompleteAsync(ct);
+        }
+
+        Console.WriteLine($"Places ({placesDataset})...");
         var placeIds = new HashSet<int>();
         await using (var w = await conn.BeginBinaryImportAsync(
             "COPY staging_place (geoname_id,name,ascii_name,lat,lon,feature_code,country_iso2,admin1,population,elevation,timezone) FROM STDIN (FORMAT BINARY)", ct))
@@ -82,9 +98,9 @@ public static class GeoNamesImporter
             }
             await w.CompleteAsync(ct);
         }
-        Console.WriteLine($"  {placeIds.Count:N0} lugares");
+        Console.WriteLine($"  {placeIds.Count:N0} places");
 
-        Console.WriteLine($"Nombres alternativos ({string.Join(",", languages)})...");
+        Console.WriteLine($"Alternate names ({string.Join(",", languages)})...");
         var langSet = new HashSet<string>(languages);
         long altCount = 0;
         await using (var w = await conn.BeginBinaryImportAsync(
@@ -106,19 +122,52 @@ public static class GeoNamesImporter
             }
             await w.CompleteAsync(ct);
         }
-        Console.WriteLine($"  {altCount:N0} nombres");
+        Console.WriteLine($"  {altCount:N0} alternate names");
 
         Console.WriteLine("Merge...");
+
         await Exec(conn, """
-            INSERT INTO country (iso2,iso3,name,capital,continent,area_km2,population,currency_code,currency_name,phone_prefix,languages,geoname_id,updated_at)
-            SELECT iso2,iso3,name,capital,continent,area,population,currency_code,currency_name,phone,languages,geoname_id,now()
+            INSERT INTO country (iso2,iso3,name,capital,continent,area_km2,population,currency_code,currency_name,phone_prefix,geoname_id,updated_at)
+            SELECT iso2,iso3,name,capital,continent,area,population,currency_code,currency_name,phone,geoname_id,now()
             FROM staging_country sc
             WHERE EXISTS (SELECT 1 FROM staging_place sp WHERE sp.country_iso2 = sc.iso2)
             ON CONFLICT (iso2) DO UPDATE SET
                 iso3=EXCLUDED.iso3, name=EXCLUDED.name, capital=EXCLUDED.capital, continent=EXCLUDED.continent,
                 area_km2=EXCLUDED.area_km2, population=EXCLUDED.population, currency_code=EXCLUDED.currency_code,
                 currency_name=EXCLUDED.currency_name, phone_prefix=EXCLUDED.phone_prefix,
-                languages=EXCLUDED.languages, updated_at=now();
+                geoname_id=EXCLUDED.geoname_id, updated_at=now();
+            """, ct);
+
+        await Exec(conn, """
+            INSERT INTO language (code)
+            SELECT DISTINCT lower(split_part(trim(u.tag), '-', 1))
+            FROM staging_country sc
+            CROSS JOIN LATERAL unnest(string_to_array(sc.languages, ',')) AS u(tag)
+            WHERE trim(u.tag) <> ''
+              AND EXISTS (SELECT 1 FROM country c WHERE c.iso2 = sc.iso2)
+            ON CONFLICT (code) DO NOTHING;
+
+            -- Nombre en inglés: se busca por ISO 639-1, luego 639-3 y luego 639-2
+            UPDATE language l
+            SET name = COALESCE(
+                (SELECT sc.name FROM staging_language_code sc WHERE sc.iso1 = l.code LIMIT 1),
+                (SELECT sc.name FROM staging_language_code sc WHERE sc.iso3 = l.code LIMIT 1),
+                (SELECT sc.name FROM staging_language_code sc WHERE sc.iso2 = l.code LIMIT 1),
+                l.name);
+
+            DELETE FROM country_language cl
+            USING country c
+            JOIN staging_country sc ON sc.iso2 = c.iso2
+            WHERE cl.country_id = c.id;
+
+            INSERT INTO country_language (country_id, language_id, position)
+            SELECT c.id, l.id, MIN(u.ord)::int
+            FROM staging_country sc
+            JOIN country c ON c.iso2 = sc.iso2
+            CROSS JOIN LATERAL unnest(string_to_array(sc.languages, ',')) WITH ORDINALITY AS u(tag, ord)
+            JOIN language l ON l.code = lower(split_part(trim(u.tag), '-', 1))
+            GROUP BY c.id, l.id
+            ON CONFLICT (country_id, language_id) DO UPDATE SET position = EXCLUDED.position;
             """, ct);
 
         await Exec(conn, """
@@ -144,14 +193,15 @@ public static class GeoNamesImporter
             ON CONFLICT (place_id, language, name) DO UPDATE SET is_preferred = EXCLUDED.is_preferred;
             """, ct);
 
-        await Exec(conn, "ANALYZE place; ANALYZE place_name;", ct);
-        Console.WriteLine("Listo.");
+        await Exec(conn, "ANALYZE place; ANALYZE place_name; ANALYZE country_language;", ct);
+        Console.WriteLine("Done.");
     }
+
     private static async Task<string> Download(HttpClient http, string file, CancellationToken ct)
     {
         var path = Path.Combine(DataDir, file);
         if (File.Exists(path)) return path;
-        Console.WriteLine($"Descargando {file}...");
+        Console.WriteLine($"Downloading {file}...");
         await using var src = await http.GetStreamAsync(BaseUrl + file, ct);
         await using var dst = File.Create(path);
         await src.CopyToAsync(dst, ct);

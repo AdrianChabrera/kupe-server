@@ -67,3 +67,35 @@ public class PlaceNameConfiguration : IEntityTypeConfiguration<PlaceName>
             .OnDelete(DeleteBehavior.Cascade);
     }
 }
+
+public class LanguageConfiguration : IEntityTypeConfiguration<Language>
+{
+    public void Configure(EntityTypeBuilder<Language> e)
+    {
+        e.ToTable("language");
+        e.HasKey(x => x.Id);
+        e.Property(x => x.Id).HasDefaultValueSql("gen_random_uuid()");
+        e.Property(x => x.Code).HasMaxLength(8).IsRequired();
+        e.HasIndex(x => x.Code).IsUnique();
+    }
+}
+
+public class CountryLanguageConfiguration : IEntityTypeConfiguration<CountryLanguage>
+{
+    public void Configure(EntityTypeBuilder<CountryLanguage> e)
+    {
+        e.ToTable("country_language");
+        e.HasKey(x => new { x.CountryId, x.LanguageId });
+        e.HasIndex(x => x.LanguageId);
+
+        e.HasOne(x => x.Country)
+            .WithMany(c => c.Languages)
+            .HasForeignKey(x => x.CountryId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        e.HasOne(x => x.Language)
+            .WithMany(l => l.Countries)
+            .HasForeignKey(x => x.LanguageId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}

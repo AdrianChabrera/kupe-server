@@ -14,6 +14,8 @@ public class AppDbContext : DbContext
     public DbSet<Country> Countries { get; set; } = null!;
     public DbSet<Place> Places { get; set; } = null!;
     public DbSet<PlaceName> PlaceNames { get; set; } = null!;
+    public DbSet<Language> Languages { get; set; } = null!;
+    public DbSet<CountryLanguage> CountryLanguages { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace KupeServer.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260930164133_InitialCreate")]
+    [Migration("20261001195801_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -121,10 +121,6 @@ namespace KupeServer.Api.Migrations
                         .HasColumnName("iso3")
                         .IsFixedLength();
 
-                    b.Property<string>("Languages")
-                        .HasColumnType("text")
-                        .HasColumnName("languages");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("text")
@@ -156,6 +152,57 @@ namespace KupeServer.Api.Migrations
                         .HasDatabaseName("ix_country_iso2");
 
                     b.ToTable("country", (string)null);
+                });
+
+            modelBuilder.Entity("KupeServer.Api.Features.Countries.Entities.CountryLanguage", b =>
+                {
+                    b.Property<Guid>("CountryId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("country_id");
+
+                    b.Property<Guid>("LanguageId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("language_id");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("integer")
+                        .HasColumnName("position");
+
+                    b.HasKey("CountryId", "LanguageId")
+                        .HasName("pk_country_language");
+
+                    b.HasIndex("LanguageId")
+                        .HasDatabaseName("ix_country_language_language_id");
+
+                    b.ToTable("country_language", (string)null);
+                });
+
+            modelBuilder.Entity("KupeServer.Api.Features.Countries.Entities.Language", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)")
+                        .HasColumnName("code");
+
+                    b.Property<string>("Name")
+                        .HasColumnType("text")
+                        .HasColumnName("name");
+
+                    b.HasKey("Id")
+                        .HasName("pk_language");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_language_code");
+
+                    b.ToTable("language", (string)null);
                 });
 
             modelBuilder.Entity("KupeServer.Api.Features.Countries.Entities.Place", b =>
@@ -345,6 +392,27 @@ namespace KupeServer.Api.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("KupeServer.Api.Features.Countries.Entities.CountryLanguage", b =>
+                {
+                    b.HasOne("KupeServer.Api.Features.Countries.Entities.Country", "Country")
+                        .WithMany("Languages")
+                        .HasForeignKey("CountryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_country_language_country_country_id");
+
+                    b.HasOne("KupeServer.Api.Features.Countries.Entities.Language", "Language")
+                        .WithMany("Countries")
+                        .HasForeignKey("LanguageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_country_language_languages_language_id");
+
+                    b.Navigation("Country");
+
+                    b.Navigation("Language");
+                });
+
             modelBuilder.Entity("KupeServer.Api.Features.Countries.Entities.Place", b =>
                 {
                     b.HasOne("KupeServer.Api.Features.Countries.Entities.Country", "Country")
@@ -371,7 +439,14 @@ namespace KupeServer.Api.Migrations
 
             modelBuilder.Entity("KupeServer.Api.Features.Countries.Entities.Country", b =>
                 {
+                    b.Navigation("Languages");
+
                     b.Navigation("Places");
+                });
+
+            modelBuilder.Entity("KupeServer.Api.Features.Countries.Entities.Language", b =>
+                {
+                    b.Navigation("Countries");
                 });
 
             modelBuilder.Entity("KupeServer.Api.Features.Countries.Entities.Place", b =>

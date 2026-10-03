@@ -29,13 +29,25 @@ namespace KupeServer.Api.Migrations
                     currency_code = table.Column<string>(type: "character(3)", fixedLength: true, maxLength: 3, nullable: true),
                     currency_name = table.Column<string>(type: "text", nullable: true),
                     phone_prefix = table.Column<string>(type: "text", nullable: true),
-                    languages = table.Column<string>(type: "text", nullable: true),
                     geoname_id = table.Column<int>(type: "integer", nullable: false),
                     updated_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false, defaultValueSql: "now()")
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("pk_country", x => x.id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "language",
+                columns: table => new
+                {
+                    id = table.Column<Guid>(type: "uuid", nullable: false, defaultValueSql: "gen_random_uuid()"),
+                    code = table.Column<string>(type: "character varying(8)", maxLength: 8, nullable: false),
+                    name = table.Column<string>(type: "text", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("pk_language", x => x.id);
                 });
 
             migrationBuilder.CreateTable(
@@ -83,6 +95,31 @@ namespace KupeServer.Api.Migrations
                         principalTable: "country",
                         principalColumn: "id",
                         onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "country_language",
+                columns: table => new
+                {
+                    country_id = table.Column<Guid>(type: "uuid", nullable: false),
+                    language_id = table.Column<Guid>(type: "uuid", nullable: false),
+                    position = table.Column<int>(type: "integer", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("pk_country_language", x => new { x.country_id, x.language_id });
+                    table.ForeignKey(
+                        name: "fk_country_language_country_country_id",
+                        column: x => x.country_id,
+                        principalTable: "country",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "fk_country_language_languages_language_id",
+                        column: x => x.language_id,
+                        principalTable: "language",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
@@ -140,6 +177,11 @@ namespace KupeServer.Api.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
+                name: "ix_country_language_language_id",
+                table: "country_language",
+                column: "language_id");
+
+            migrationBuilder.CreateIndex(
                 name: "ix_external_identities_provider_provider_user_id",
                 table: "external_identities",
                 columns: new[] { "provider", "provider_user_id" },
@@ -149,6 +191,12 @@ namespace KupeServer.Api.Migrations
                 name: "ix_external_identities_user_id_provider",
                 table: "external_identities",
                 columns: new[] { "user_id", "provider" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "ix_language_code",
+                table: "language",
+                column: "code",
                 unique: true);
 
             migrationBuilder.CreateIndex(
@@ -204,10 +252,16 @@ namespace KupeServer.Api.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropTable(
+                name: "country_language");
+
+            migrationBuilder.DropTable(
                 name: "external_identities");
 
             migrationBuilder.DropTable(
                 name: "place_name");
+
+            migrationBuilder.DropTable(
+                name: "language");
 
             migrationBuilder.DropTable(
                 name: "users");
