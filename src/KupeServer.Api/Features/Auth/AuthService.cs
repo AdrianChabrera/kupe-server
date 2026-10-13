@@ -1,48 +1,195 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Text.Json;
 using KupeServer.Api.Data;
 using KupeServer.Api.Features.Auth.Dtos;
+using KupeServer.Api.Features.Auth.Entities;
 using KupeServer.Api.Features.Auth.Exceptions;
+using KupeServer.Api.Features.Countries.Exceptions;
 using KupeServer.Api.Features.Users.Dtos;
 using KupeServer.Api.Features.Users.Entities;
 using KupeServer.Api.Features.Users.Enums;
 using KupeServer.Api.Features.Users.Exceptions;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Npgsql;
 
 namespace KupeServer.Api.Features.Auth;
 
-public class AuthService(AppDbContext context, IConfiguration configuration, IPasswordHasher<User> passwordHasher)
+public class AuthService(
+    AppDbContext context,
+    IConfiguration configuration,
+    IPasswordHasher<User> passwordHasher,
+    IDataProtectionProvider dataProtectionProvider)
 {
-    public async Task<User> Register(RegisterDto request)
-    {
-        if (await context.Users.AnyAsync(u => u.Username == request.Username))
-        {
-            throw new UsernameAlreadyExistsException(request.Username);
-        }
+    private static readonly TimeSpan RegistrationTokenLifetime = TimeSpan.FromMinutes(30);
 
+    private readonly ITimeLimitedDataProtector _registrationProtector = dataProtectionProvider
+        .CreateProtector("KupeServer.Auth.PendingRegistration.v1")
+        .ToTimeLimitedDataProtector();
+
+    public async Task<RegistrationTokenResponseDto> StartRegistration(
+        RegisterDto request, CancellationToken ct = default)
+    {
         var email = request.Email.Trim().ToLowerInvariant();
 
-        if (await context.Users.AnyAsync(u => u.Email == email))
+        if (await context.Users.AnyAsync(u => u.Email == email, ct))
         {
             throw new EmailAlreadyExistsException(email);
         }
 
-        var user = new User();
-        var hashedPassword = passwordHasher.HashPassword(user, request.Password);
+        var pending = new PendingRegistrationDto(
+            Email: email,
+            PasswordHash: passwordHasher.HashPassword(new User(), request.Password),
+            ExternalIdentity: null);
 
-            
-        user.Username = request.Username;
-        user.Email = email;
-        user.PasswordHash = hashedPassword;
-        user.Role = UserRole.User;
+        return CreateRegistrationResponse(pending);
+    }
+
+    public RegistrationTokenResponseDto CreateRegistrationResponse(PendingRegistrationDto pending)
+    {
+        var expiresAt = DateTimeOffset.UtcNow.Add(RegistrationTokenLifetime);
+        var token = _registrationProtector.Protect(JsonSerializer.Serialize(pending), expiresAt);
+
+        return new RegistrationTokenResponseDto
+        {
+            RegistrationToken = token,
+            ExpiresAt = expiresAt,
+            Email = pending.Email,
+            Provider = pending.ExternalIdentity?.Provider
+        };
+    }
+
+    public async Task<TokenResponseDto> CompleteRegistration(
+        CompleteRegistrationDto request, CancellationToken ct = default)
+    {
+        var pending = ReadRegistrationToken(request.RegistrationToken);
+        var languageIds = request.LanguageIds?.Distinct().ToList() ?? [];
+
+        await EnsureProfileDataIsValid(request.CountryId, languageIds, ct);
+
+        if (await context.Users.AnyAsync(u => u.Email == pending.Email, ct))
+        {
+            throw EmailConflict(pending);
+        }
+
+        if (await context.Users.AnyAsync(u => u.Username == request.Username, ct))
+        {
+            throw new UsernameAlreadyExistsException(request.Username);
+        }
+
+        if (pending.ExternalIdentity is { } external
+            && await context.ExternalIdentities.AnyAsync(i =>
+                i.Provider == external.Provider && i.ProviderUserId == external.ProviderUserId, ct))
+        {
+            throw new ExternalIdentityAlreadyLinkedException(external.Provider);
+        }
+
+        var user = new User
+        {
+            Username = request.Username,
+            Email = pending.Email,
+            PasswordHash = pending.PasswordHash,
+            Role = UserRole.User,
+            CountryId = request.CountryId
+        };
+
+        foreach (var languageId in languageIds)
+        {
+            user.Languages.Add(new UserLanguage { LanguageId = languageId });
+        }
+
+        if (pending.ExternalIdentity is { } identity)
+        {
+            user.ExternalIdentities.Add(new ExternalIdentity
+            {
+                UserId = user.Id,
+                Provider = identity.Provider,
+                ProviderUserId = identity.ProviderUserId,
+                Email = identity.Email
+            });
+        }
 
         context.Users.Add(user);
-        await context.SaveChangesAsync();
 
-        return user;
+        try
+        {
+            await context.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException
+                                           {
+                                               SqlState: PostgresErrorCodes.UniqueViolation
+                                           } pg)
+        {
+            throw MapUniqueViolation(pg, pending, request.Username);
+        }
+
+        return await CreateTokenResponse(user);
+    }
+
+    private PendingRegistrationDto ReadRegistrationToken(string token)
+    {
+        try
+        {
+            var json = _registrationProtector.Unprotect(token);
+
+            return JsonSerializer.Deserialize<PendingRegistrationDto>(json)
+                   ?? throw new InvalidRegistrationTokenException();
+        }
+        catch (Exception ex) when (ex is CryptographicException or JsonException or FormatException)
+        {
+            throw new InvalidRegistrationTokenException();
+        }
+    }
+
+    private async Task EnsureProfileDataIsValid(Guid? countryId, List<Guid> languageIds, CancellationToken ct)
+    {
+        if (countryId is { } id && !(await context.Countries.AnyAsync(c => c.Id == id, ct)))
+        {
+            throw new CountryNotFoundException(id);
+        }
+
+        if (languageIds.Count == 0)
+        {
+            return;
+        }
+
+        var existing = await context.Languages
+            .Where(l => languageIds.Contains(l.Id))
+            .Select(l => l.Id)
+            .ToListAsync(ct);
+
+        var missing = languageIds.Except(existing).ToList();
+
+        if (missing.Count > 0)
+        {
+            throw new LanguageNotFoundException(missing);
+        }
+    }
+
+    private static Exception EmailConflict(PendingRegistrationDto pending) =>
+        pending.IsExternal
+            ? new ExternalEmailConflictException()
+            : new EmailAlreadyExistsException(pending.Email);
+
+    private static Exception MapUniqueViolation(PostgresException pg, PendingRegistrationDto pending, string username)
+    {
+        var constraint = pg.ConstraintName ?? string.Empty;
+
+        if (constraint.Contains("username", StringComparison.OrdinalIgnoreCase))
+        {
+            return new UsernameAlreadyExistsException(username);
+        }
+
+        if (constraint.Contains("email", StringComparison.OrdinalIgnoreCase))
+        {
+            return EmailConflict(pending);
+        }
+
+        return new ExternalIdentityAlreadyLinkedException(pending.ExternalIdentity?.Provider ?? "external");
     }
 
     public async Task<TokenResponseDto> Login(LoginDto request)

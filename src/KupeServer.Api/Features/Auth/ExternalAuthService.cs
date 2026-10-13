@@ -1,22 +1,18 @@
-using System.Security.Cryptography;
-using System.Text.RegularExpressions;
 using KupeServer.Api.Data;
 using KupeServer.Api.Features.Auth.Dtos;
 using KupeServer.Api.Features.Auth.Entities;
 using KupeServer.Api.Features.Auth.Exceptions;
 using KupeServer.Api.Features.Auth.ExternalProviders;
-using KupeServer.Api.Features.Users.Entities;
-using KupeServer.Api.Features.Users.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace KupeServer.Api.Features.Auth;
 
-public partial class ExternalAuthService(
+public class ExternalAuthService(
     AppDbContext context,
     AuthService authService,
     ExternalAuthProviderResolver providerResolver)
 {
-    public async Task<TokenResponseDto> Login(string providerName, string credential, CancellationToken ct = default)
+    public async Task<ExternalAuthResultDto> Login(string providerName, string credential, CancellationToken ct = default)
     {
         var info = await providerResolver.Resolve(providerName).AuthenticateAsync(credential, ct);
 
@@ -24,9 +20,12 @@ public partial class ExternalAuthService(
             .Include(i => i.User)
             .FirstOrDefaultAsync(i => i.Provider == info.Provider && i.ProviderUserId == info.ProviderUserId, ct);
 
-        var user = identity?.User ?? await CreateUserFromExternalProfile(info, ct);
+        if (identity is not null)
+        {
+            return ExternalAuthResultDto.Authenticated(await authService.CreateTokenResponse(identity.User));
+        }
 
-        return await authService.CreateTokenResponse(user);
+        return ExternalAuthResultDto.RegistrationRequired(await StartRegistration(info, ct));
     }
 
     public async Task Link(Guid userId, string providerName, string credential, CancellationToken ct = default)
@@ -42,11 +41,17 @@ public partial class ExternalAuthService(
             throw new ExternalIdentityAlreadyLinkedException(info.Provider);
         }
 
-        context.ExternalIdentities.Add(NewIdentity(userId, info));
+        context.ExternalIdentities.Add(new ExternalIdentity
+        {
+            UserId = userId,
+            Provider = info.Provider,
+            ProviderUserId = info.ProviderUserId,
+            Email = info.Email
+        });
         await context.SaveChangesAsync(ct);
     }
 
-    private async Task<User> CreateUserFromExternalProfile(ExternalUserInfo info, CancellationToken ct)
+    private async Task<RegistrationTokenResponseDto> StartRegistration(ExternalUserInfo info, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(info.Email) || !info.EmailVerified)
         {
@@ -60,51 +65,11 @@ public partial class ExternalAuthService(
             throw new ExternalEmailConflictException();
         }
 
-        var user = new User
-        {
-            Username = await GenerateUniqueUsername(info, ct),
-            Email = email,
-            PasswordHash = null,
-            Role = UserRole.User
-        };
+        var pending = new PendingRegistrationDto(
+            Email: email,
+            PasswordHash: null,
+            ExternalIdentity: new PendingExternalIdentityDto(info.Provider, info.ProviderUserId, info.Email));
 
-        user.ExternalIdentities.Add(NewIdentity(user.Id, info));
-
-        context.Users.Add(user);
-        await context.SaveChangesAsync(ct);
-
-        return user;
+        return authService.CreateRegistrationResponse(pending);
     }
-
-    private static ExternalIdentity NewIdentity(Guid userId, ExternalUserInfo info) => new()
-    {
-        UserId = userId,
-        Provider = info.Provider,
-        ProviderUserId = info.ProviderUserId,
-        Email = info.Email
-    };
-
-    private async Task<string> GenerateUniqueUsername(ExternalUserInfo info, CancellationToken ct)
-    {
-        var source = info.Email!.Split('@')[0];
-        var baseName = InvalidUsernameChars().Replace(source, string.Empty);
-
-        if (baseName.Length < 3)
-        {
-            baseName = "user";
-        }
-
-        baseName = baseName[..Math.Min(baseName.Length, 24)];
-
-        var candidate = baseName;
-        while (await context.Users.AnyAsync(u => u.Username == candidate, ct))
-        {
-            candidate = $"{baseName}{RandomNumberGenerator.GetInt32(1000, 10000)}";
-        }
-
-        return candidate;
-    }
-
-    [GeneratedRegex("[^a-zA-Z0-9_.-]")]
-    private static partial Regex InvalidUsernameChars();
 }

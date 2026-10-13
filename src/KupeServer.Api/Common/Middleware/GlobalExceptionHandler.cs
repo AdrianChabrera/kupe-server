@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
+using KupeServer.Api.Common.Exceptions;
 using KupeServer.Api.Features.Auth;
+using KupeServer.Api.Features.Countries.Exceptions;
 using KupeServer.Api.Features.Users.Exceptions;
 using KupeServer.Api.Features.Auth.Exceptions;
 
@@ -33,11 +35,18 @@ public class GlobalExceptionHandler : IExceptionHandler
 
         httpContext.Response.StatusCode = statusCode;
 
-        await httpContext.Response.WriteAsJsonAsync(new ProblemDetails
+        var problem = new ProblemDetails
         {
             Status = statusCode,
             Title = title,
-        }, cancellationToken);
+        };
+
+        if (exception is DomainException domainException)
+        {
+            problem.Extensions["errorCode"] = domainException.ErrorCode;
+        }
+
+        await httpContext.Response.WriteAsJsonAsync(problem, cancellationToken);
 
         return true;
     }
@@ -55,6 +64,9 @@ public class GlobalExceptionHandler : IExceptionHandler
             ExternalEmailNotVerifiedException => (StatusCodes.Status401Unauthorized, exception.Message),
             ExternalEmailConflictException => (StatusCodes.Status409Conflict, exception.Message),
             ExternalIdentityAlreadyLinkedException => (StatusCodes.Status409Conflict, exception.Message),
+            InvalidRegistrationTokenException => (StatusCodes.Status400BadRequest, exception.Message),
+            CountryNotFoundException => (StatusCodes.Status404NotFound, exception.Message),
+            LanguageNotFoundException => (StatusCodes.Status404NotFound, exception.Message),
             _ => (StatusCodes.Status500InternalServerError, "An unexpected error occurred.")
         };
     }

@@ -1,6 +1,5 @@
 using KupeServer.Api.Features.Auth.Dtos;
 using KupeServer.Api.Features.Users.Dtos;
-using KupeServer.Api.Features.Users.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -9,14 +8,24 @@ namespace KupeServer.Api.Features.Auth
 {
     [Route("api/[controller]")]
     [ApiController]
-    public class AuthController(AuthService authService, ExternalAuthService externalAuthService) : ControllerBase    {
-        [HttpPost("register")]
-        public async Task<ActionResult<User>> Register(RegisterDto request)
+    public class AuthController(AuthService authService, ExternalAuthService externalAuthService) : ControllerBase
+    {
+        [HttpPost("register/start")]
+        public async Task<ActionResult<RegistrationTokenResponseDto>> StartRegistration(
+            RegisterDto request, CancellationToken ct)
         {
-            var user = await authService.Register(request);
-            var response = new UserResponseDto(user);
+            var result = await authService.StartRegistration(request, ct);
 
-            return Ok(response);
+            return Ok(result);
+        }
+
+        [HttpPost("register/complete")]
+        public async Task<ActionResult<TokenResponseDto>> CompleteRegistration(
+            CompleteRegistrationDto request, CancellationToken ct)
+        {
+            var result = await authService.CompleteRegistration(request, ct);
+
+            return Ok(result);
         }
 
         [HttpPost("login")]
@@ -36,7 +45,7 @@ namespace KupeServer.Api.Features.Auth
         }
 
         [HttpPost("external/{provider}")]
-        public async Task<ActionResult<TokenResponseDto>> ExternalLogin(
+        public async Task<ActionResult<ExternalAuthResultDto>> ExternalLogin(
             string provider, ExternalLoginRequestDto request, CancellationToken ct)
         {
             var result = await externalAuthService.Login(provider, request.Token, ct);

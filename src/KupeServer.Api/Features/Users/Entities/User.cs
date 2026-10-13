@@ -1,4 +1,5 @@
 using KupeServer.Api.Features.Auth.Entities;
+using KupeServer.Api.Features.Countries.Entities;
 using KupeServer.Api.Features.Users.Enums;
 
 namespace KupeServer.Api.Features.Users.Entities;
@@ -12,5 +13,10 @@ public class User
     public UserRole Role { get; set; } = UserRole.User;
     public string? RefreshTokenHash { get; set; }
     public DateTime? RefreshTokenExpiryTime { get; set; }
+
+    public Guid? CountryId { get; set; }
+    public Country? Country { get; set; }
+    public ICollection<UserLanguage> Languages { get; set; } = [];
+
     public ICollection<ExternalIdentity> ExternalIdentities { get; set; } = [];
 }
