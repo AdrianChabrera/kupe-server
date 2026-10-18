@@ -15,7 +15,7 @@ public class CountriesController(CountriesService countriesService) : Controller
         return Ok(countries);
     }
 
-    [HttpGet]
+    [HttpGet("languages")]
     public async Task<ActionResult<List<LanguageResponseDto>>> GetAllLanguages(CancellationToken ct)
     {
         var languages = await countriesService.findAllLanguages(ct);

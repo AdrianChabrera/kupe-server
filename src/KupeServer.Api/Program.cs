@@ -53,6 +53,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<CountriesService>();
 
 builder.Services.AddDataProtection().SetApplicationName("KupeServer");
 

@@ -1,11 +1,10 @@
 using KupeServer.Api.Data;
 using KupeServer.Api.Features.Countries.Dtos;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 public class CountriesService(AppDbContext context)
 {
-    public async Task<ActionResult<List<CountryResponseDto>>> findAllCountries(CancellationToken ct)
+    public async Task<List<CountryResponseDto>> findAllCountries(CancellationToken ct)
     {
         var countries = await context.Countries
             .AsNoTracking()
@@ -15,7 +14,7 @@ public class CountriesService(AppDbContext context)
         return countries;
     }
 
-    public async Task<ActionResult<List<LanguageResponseDto>>> findAllLanguages(CancellationToken ct)
+    public async Task<List<LanguageResponseDto>> findAllLanguages(CancellationToken ct)
     {
         var languages = await context.Languages
             .AsNoTracking()
@@ -25,7 +24,7 @@ public class CountriesService(AppDbContext context)
         return languages;
     }
 
-    public async Task<ActionResult<List<LanguageResponseDto>>> findCountryLanguages(Guid countryId, CancellationToken ct)
+    public async Task<List<LanguageResponseDto>> findCountryLanguages(Guid countryId, CancellationToken ct)
     {
         var languages = await context.CountryLanguages
             .AsNoTracking()
